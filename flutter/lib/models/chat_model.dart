@@ -325,7 +325,9 @@ class ChatModel with ChangeNotifier {
     if (_isShowCMSidePage) {
       _isShowCMSidePage = !_isShowCMSidePage;
       notifyListeners();
-      await windowManager.show();
+      if (!isWindows || !isSingleViewApp() || canShowWindowsConnectionManager) {
+        await windowManager.show();
+      }
       if (isWindows) {
         await setWindowsCmWindowBounds(kConnectionManagerWindowSizeClosedChat);
       } else {
@@ -341,7 +343,9 @@ class ChatModel with ChangeNotifier {
         client.unreadChatMessageCount.value = 0;
       }
       requestChatInputFocus();
-      await windowManager.show();
+      if (!isWindows || !isSingleViewApp() || canShowWindowsConnectionManager) {
+        await windowManager.show();
+      }
       if (isWindows) {
         await setWindowsCmWindowBounds(kConnectionManagerWindowSizeOpenChat);
       } else {

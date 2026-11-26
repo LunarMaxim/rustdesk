@@ -306,19 +306,23 @@ void runConnectionManagerScreen() async {
 
 bool _isCmReadyToShow = false;
 
-showCmWindow({bool isStartup = false}) async {
+bool get canShowWindowsConnectionManager =>
+    _isCmReadyToShow && gFFI.serverModel.shouldShowCmForConnection;
+
+showCmWindow({bool isStartup = false, bool focusPendingRequest = false}) async {
   if (isWindows && !isStartup) {
-    if (!_isCmReadyToShow || !gFFI.serverModel.shouldShowCmForConnection) return;
-    if (await windowManager.getOpacity() != 1) {
+    if (!canShowWindowsConnectionManager) return;
+    final needsReveal = await windowManager.getOpacity() != 1;
+    if (needsReveal) {
       await windowManager.setSizeAlignment(
           kConnectionManagerWindowSizeClosedChat, Alignment.topRight);
-      if (!gFFI.serverModel.shouldShowCmForConnection) return;
+      if (!canShowWindowsConnectionManager) return;
       await windowManager.setOpacity(1);
-      if (gFFI.serverModel.shouldShowCmForConnection) {
-        await windowOnTop(null);
-      } else {
-        await hideCmWindow();
-      }
+    }
+    if (canShowWindowsConnectionManager) {
+      if (needsReveal || focusPendingRequest) await windowOnTop(null);
+    } else if (needsReveal) {
+      await hideCmWindow();
     }
     return;
   }
