@@ -13,6 +13,7 @@ import 'package:window_manager/window_manager.dart';
 import '../common.dart';
 import '../common/formatter/id_formatter.dart';
 import '../desktop/pages/server_page.dart' as desktop;
+import '../desktop/widgets/connection_manager_presentation.dart';
 import '../desktop/widgets/tabbar_widget.dart';
 import '../mobile/pages/server_page.dart';
 import '../mobile/widgets/android_file_transfer_setup.dart';
@@ -128,6 +129,15 @@ class ServerModel with ChangeNotifier {
 
   List<Client> get clients => _clients;
 
+  bool get shouldShowCmForConnection => shouldPresentConnectionManager(
+        isWindows: isWindows,
+        hiddenByPolicy: hideCm,
+        clients: _clients.map((client) => (
+              authorized: client.authorized,
+              disconnected: client.disconnected,
+            )),
+      );
+
   final controller = ScrollController();
 
   WeakReference<FFI> parent;
@@ -172,7 +182,11 @@ class ServerModel with ChangeNotifier {
             }
           } else {
             _zeroClientLengthCounter = 0;
-            if (!hideCm) showCmWindow();
+            if (shouldShowCmForConnection) {
+              showCmWindow();
+            } else if (isWindows) {
+              hideCmWindow();
+            }
           }
         }
       }
@@ -520,9 +534,9 @@ class ServerModel with ChangeNotifier {
       }
     }
     if (desktopType == DesktopType.cm) {
-      if (_clients.isEmpty) {
+      if (_clients.isEmpty || (isWindows && !shouldShowCmForConnection)) {
         hideCmWindow();
-      } else if (!hideCm) {
+      } else if (shouldShowCmForConnection) {
         showCmWindow();
       }
     }
@@ -566,8 +580,12 @@ class ServerModel with ChangeNotifier {
         _clients.removeAt(index_disconnected);
         tabController.remove(index_disconnected);
       }
-      if (desktopType == DesktopType.cm && !hideCm) {
-        showCmWindow();
+      if (desktopType == DesktopType.cm) {
+        if (shouldShowCmForConnection) {
+          showCmWindow();
+        } else if (isWindows) {
+          hideCmWindow();
+        }
       }
       scrollToBottom();
       notifyListeners();
@@ -585,11 +603,14 @@ class ServerModel with ChangeNotifier {
         closable: false,
         onTap: () {},
         page: desktop.buildConnectionCard(client)));
-    Future.delayed(Duration.zero, () async {
-      if (!hideCm) windowOnTop(null);
-    });
+    if (!isWindows || desktopType != DesktopType.cm) {
+      Future.delayed(Duration.zero, () async {
+        if (!hideCm) windowOnTop(null);
+      });
+    }
     // Only do the hidden task when on Desktop.
-    if (client.authorized && isDesktop) {
+    if (client.authorized && isDesktop &&
+        (!isWindows || desktopType != DesktopType.cm)) {
       cmHiddenTimer = Timer(const Duration(seconds: 3), () {
         if (!hideCm) windowManager.minimize();
         cmHiddenTimer = null;
