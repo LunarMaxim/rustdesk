@@ -4,7 +4,7 @@ This fork starts the Windows connection manager hidden. An already authorized in
 
 ## Updating the fork
 
-The Windows presentation changes live on `lunar/quiet-connection-manager`, initially based on upstream tag `1.5.3`. Leave the fork's `master` free of local customization. When upgrading, fetch upstream tags and replay the small presentation commit(s) onto the chosen stable tag in a clean checkout, then rebuild the Windows client and run the regression test. To avoid overwriting the published branch's history, prefer a new local branch for a new base; a merge is not needed just to update the patch's base.
+The published patch lives on the fork's `lunar/quiet-cm-master` branch. The local `lunar/quiet-connection-manager` branch applies the same patch to upstream tag `1.5.3`, matching the installed release. The fork's `master` stays unmodified. When upgrading, fetch upstream tags and cherry-pick the presentation commit onto the chosen stable tag, then rebuild the Windows client and run the regression test. Use a new branch for a new base instead of rewriting the published branch's history.
 
 ```sh
 git fetch upstream --tags
