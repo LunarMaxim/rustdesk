@@ -734,6 +734,10 @@ Future<void> windowOnTop(int? id) async {
   if (!isDesktop) {
     return;
   }
+  if (id == null && isWindows && isSingleViewApp() &&
+      !canShowWindowsConnectionManager) {
+    return;
+  }
   print("Bring window '$id' on top");
   if (id == null) {
     // main window

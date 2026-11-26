@@ -582,7 +582,8 @@ class ServerModel with ChangeNotifier {
       }
       if (desktopType == DesktopType.cm) {
         if (shouldShowCmForConnection) {
-          showCmWindow();
+          showCmWindow(
+              focusPendingRequest: !client.authorized && !client.disconnected);
         } else if (isWindows) {
           hideCmWindow();
         }
