@@ -1,5 +1,8 @@
 use std::net::Ipv4Addr;
 
+#[cfg(windows)]
+pub(crate) const PEER_CAPABILITY: &str = "reverse_desktop_takeover";
+
 pub(crate) fn pinned_tailscale_peer(configured: &str, whitelist: &str) -> Option<Ipv4Addr> {
     let peer: Ipv4Addr = configured.trim().parse().ok()?;
     let [first, second, _, _] = peer.octets();
@@ -62,13 +65,32 @@ pub(crate) async fn snapshot_before_dial(id: &str) -> Option<IncomingDesktop> {
 }
 
 #[cfg(windows)]
-pub(crate) async fn take_over(incoming: IncomingDesktop) {
+pub(crate) async fn take_over(
+    incoming: IncomingDesktop,
+    state: &std::sync::Mutex<crate::ui_session_interface::ConnectionRoundState>,
+    round: u32,
+) {
+    use std::{
+        future::{poll_fn, Future},
+        pin::pin,
+        task::Poll,
+    };
+
     let result = async {
         let mut ipc = crate::ipc::connect(700, "").await?;
-        ipc.send(&crate::ipc::Data::ReplaceReverseDesktop(
-            incoming.peer,
-            incoming.token,
-        ))
+        let request = crate::ipc::Data::ReplaceReverseDesktop(incoming.peer, incoming.token);
+        let mut send = pin!(ipc.send(&request));
+        // Reconnect shares this lock. Check every write poll rather than only
+        // before awaiting the pipe, and never hold the lock across a yield.
+        poll_fn(|cx| {
+            let Ok(state) = state.lock() else {
+                return Poll::Ready(Ok(()));
+            };
+            if !state.is_current_connected_round(round) {
+                return Poll::Ready(Ok(()));
+            }
+            send.as_mut().poll(cx)
+        })
         .await
     }
     .await;
@@ -117,6 +139,24 @@ mod tests {
         );
         assert!(only_reverse_session(peer, [&other].into_iter()).is_none());
         assert!(only_reverse_session(peer, [&old, &old].into_iter()).is_none());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_superseded_round_is_ineligible_even_if_it_had_connected() {
+        let mut state = crate::ui_session_interface::ConnectionRoundState::default();
+        let first = state.new_round();
+        state.set_connected();
+        assert!(state.is_current_connected_round(first));
+
+        let next = state.new_round();
+        assert!(!state.is_current_connected_round(first));
+        assert!(!state.is_current_connected_round(next));
+        state.set_connected();
+        assert!(!state.is_current_connected_round(first));
+        assert!(state.is_current_connected_round(next));
+        state.set_disconnected(next);
+        assert!(!state.is_current_connected_round(next));
     }
 
     #[test]
