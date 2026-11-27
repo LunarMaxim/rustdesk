@@ -398,6 +398,8 @@ pub struct Connection {
     show_remote_cursor: bool,
     // by peer
     ip: String,
+    #[cfg(windows)]
+    direct_ip_access: bool,
     // by peer
     disable_keyboard: bool,
     // by peer
@@ -541,6 +543,8 @@ impl Connection {
         let super::ConnectionMeta {
             control_permissions,
             controlled_context,
+            #[cfg(windows)]
+            direct_ip_access,
         } = meta;
         // Android is not supported yet, so we always set control_permissions to None.
         #[cfg(target_os = "android")]
@@ -617,6 +621,8 @@ impl Connection {
             follow_remote_window: false,
             multi_ui_session: false,
             ip: "".to_owned(),
+            #[cfg(windows)]
+            direct_ip_access,
             disable_audio: false,
             #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
             enable_file_transfer: false,
@@ -1186,6 +1192,14 @@ impl Connection {
                                     impl_key,
                                 )).await;
                             }
+                        }
+                        #[cfg(windows)]
+                        ipc::Data::ReverseDesktopReplaced => {
+                            conn.send_close_reason_no_retry(
+                                "Replaced by the newer reverse desktop session; automatic retry not allowed",
+                            ).await;
+                            conn.on_close("reverse desktop handover", false).await;
+                            break;
                         }
                         #[cfg(all(target_os = "windows", feature = "flutter"))]
                         ipc::Data::PrinterData(data) => {
@@ -1966,6 +1980,8 @@ impl Connection {
             self.session_key(),
             self.tx_from_authed.clone(),
             self.lr.clone(),
+            #[cfg(windows)]
+            self.reverse_desktop_identity(auth_conn_type),
         ));
         self.session_last_recv_time = SESSIONS
             .lock()
@@ -7030,6 +7046,58 @@ pub struct AuthedConn {
     pub session_key: SessionKey,
     pub sender: mpsc::UnboundedSender<Data>,
     pub printer: bool,
+    #[cfg(windows)]
+    reverse_desktop: Option<crate::reverse_session_takeover::IncomingDesktop>,
+}
+
+#[cfg(windows)]
+impl Connection {
+    fn reverse_desktop_identity(
+        &self,
+        conn_type: AuthConnType,
+    ) -> Option<crate::reverse_session_takeover::IncomingDesktop> {
+        use crate::reverse_session_takeover::{policy_peer, IncomingDesktop};
+        if !self.direct_ip_access || conn_type != AuthConnType::Remote {
+            return None;
+        }
+        let peer = match self.ip.parse().ok()? {
+            std::net::IpAddr::V4(peer) => peer,
+            std::net::IpAddr::V6(peer) => peer.to_ipv4_mapped()?,
+        };
+        (policy_peer() == Some(peer)).then(|| IncomingDesktop {
+            peer,
+            token: uuid::Uuid::new_v4().to_string(),
+        })
+    }
+}
+
+#[cfg(windows)]
+pub(crate) fn snapshot_reverse_desktop(peer: std::net::Ipv4Addr) -> Option<String> {
+    use crate::reverse_session_takeover::{only_reverse_session, policy_peer};
+    if policy_peer() != Some(peer) {
+        return None;
+    }
+    let conns = AUTHED_CONNS.lock().ok()?;
+    let eligible = conns.iter().filter_map(|conn| conn.reverse_desktop.as_ref());
+    only_reverse_session(peer, eligible).map(|incoming| incoming.token.clone())
+}
+
+#[cfg(windows)]
+pub(crate) fn replace_reverse_desktop(peer: std::net::Ipv4Addr, token: &str) {
+    use crate::reverse_session_takeover::{matches_snapshot, policy_peer};
+    if policy_peer() != Some(peer) {
+        return;
+    }
+    let Ok(conns) = AUTHED_CONNS.lock() else {
+        return;
+    };
+    if let Some(conn) = conns.iter().find(|conn| {
+        conn.reverse_desktop
+            .as_ref()
+            .is_some_and(|incoming| matches_snapshot(incoming, peer, token))
+    }) {
+        allow_err!(conn.sender.send(Data::ReverseDesktopReplaced));
+    }
 }
 
 mod raii {
@@ -7078,6 +7146,7 @@ mod raii {
             session_key: SessionKey,
             sender: mpsc::UnboundedSender<Data>,
             lr: LoginRequest,
+            #[cfg(windows)] reverse_desktop: Option<crate::reverse_session_takeover::IncomingDesktop>,
         ) -> Self {
             let printer = conn_type == crate::server::AuthConnType::Remote
                 && crate::is_support_remote_print(&lr.version)
@@ -7088,6 +7157,8 @@ mod raii {
                 session_key,
                 sender,
                 printer,
+                #[cfg(windows)]
+                reverse_desktop,
             });
             Self::check_wake_lock();
             use std::sync::Once;
@@ -8023,6 +8094,8 @@ mod test {
             session_key,
             sender: mpsc::unbounded_channel().0,
             printer: false,
+            #[cfg(windows)]
+            reverse_desktop: None,
         };
         let mine = key(7, "peer");
         let remote = AuthConnType::Remote;

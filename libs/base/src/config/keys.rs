@@ -55,6 +55,7 @@ pub const OPTION_ALLOW_SCOPE_VIOLATION_ALARM: &str = "allow-scope-violation-alar
 pub const OPTION_ALLOW_REMOTE_CONFIG_MODIFICATION: &str = "allow-remote-config-modification";
 pub const OPTION_ENABLE_LAN_DISCOVERY: &str = "enable-lan-discovery";
 pub const OPTION_DIRECT_ACCESS_PORT: &str = "direct-access-port";
+pub const OPTION_REVERSE_SESSION_TAKEOVER_PEER: &str = "reverse-session-takeover-peer";
 pub const OPTION_WHITELIST: &str = "whitelist";
 pub const OPTION_ID_WHITELIST: &str = "id-whitelist";
 pub const OPTION_ALLOW_AUTO_DISCONNECT: &str = "allow-auto-disconnect";

@@ -48,6 +48,8 @@ fn connection_meta(
     ConnectionMeta {
         control_permissions,
         controlled_context,
+        #[cfg(windows)]
+        direct_ip_access: false,
     }
 }
 
@@ -1461,7 +1463,11 @@ async fn direct_server(server: ServerPtr) {
                             hbb_common::Stream::from(stream, local_addr),
                             addr,
                             false,
-                            ConnectionMeta::default(), // Direct connections don't have server-side user context.
+                            ConnectionMeta {
+                                #[cfg(windows)]
+                                direct_ip_access: true,
+                                ..ConnectionMeta::default()
+                            },
                         )
                         .await
                     );

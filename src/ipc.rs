@@ -426,6 +426,12 @@ pub enum Data {
     FileTransferLog((String, String)),
     #[cfg(windows)]
     ControlledSessionCount(usize),
+    #[cfg(windows)]
+    ReverseDesktopSnapshot(std::net::Ipv4Addr, Option<String>),
+    #[cfg(windows)]
+    ReplaceReverseDesktop(std::net::Ipv4Addr, String),
+    #[cfg(windows)]
+    ReverseDesktopReplaced,
     CmErr(String),
     // CM-side file reading responses (Windows only)
     // These are sent from CM back to Connection when CM handles file reading
@@ -650,6 +656,16 @@ pub(crate) async fn start_with_listener(postfix: &str, mut incoming: Incoming) {
                                     break;
                                 }
                                 Ok(Some(data)) => {
+                                    #[cfg(windows)]
+                                    if !postfix.is_empty()
+                                        && matches!(
+                                            &data,
+                                            Data::ReverseDesktopSnapshot(..)
+                                                | Data::ReplaceReverseDesktop(..)
+                                        )
+                                    {
+                                        break;
+                                    }
                                     // On Linux/macOS, the protected `_service` channel is used only for
                                     // syncing config between root service and the active user process.
                                     //
@@ -1213,6 +1229,15 @@ async fn handle(data: Data, stream: &mut Connection) {
                     .send(&Data::SwitchSidesUuid(uuid, id, action, Some(allowed)))
                     .await
             );
+        }
+        #[cfg(windows)]
+        Data::ReverseDesktopSnapshot(peer, None) => {
+            let token = crate::server::snapshot_reverse_desktop(peer);
+            allow_err!(stream.send(&Data::ReverseDesktopSnapshot(peer, token)).await);
+        }
+        #[cfg(windows)]
+        Data::ReplaceReverseDesktop(peer, token) => {
+            crate::server::replace_reverse_desktop(peer, &token);
         }
         #[cfg(windows)]
         Data::ControlledSessionCount(_) => {

@@ -5035,6 +5035,8 @@ pub trait Interface: Send + Clone + 'static + Sized {
 #[derive(Clone)]
 pub enum Data {
     Close,
+    #[cfg(windows)]
+    ReverseDesktopFrameDecoded,
     RejectInsecureConnection,
     Login((String, String, String, bool)),
     Message(Message),
