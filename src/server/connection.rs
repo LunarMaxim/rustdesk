@@ -1974,6 +1974,10 @@ impl Connection {
         } else {
             (0, AuthConnType::Remote)
         };
+        #[cfg(windows)]
+        let reverse_desktop = self.reverse_desktop_identity(auth_conn_type);
+        #[cfg(windows)]
+        let allows_reverse_takeover = reverse_desktop.is_some();
         self.authed_conn_id = Some(self::raii::AuthedConnID::new(
             self.inner.id(),
             auth_conn_type,
@@ -1981,7 +1985,7 @@ impl Connection {
             self.tx_from_authed.clone(),
             self.lr.clone(),
             #[cfg(windows)]
-            self.reverse_desktop_identity(auth_conn_type),
+            reverse_desktop,
         ));
         self.session_last_recv_time = SESSIONS
             .lock()
@@ -2032,6 +2036,12 @@ impl Connection {
         }
         #[cfg(target_os = "windows")]
         {
+            if allows_reverse_takeover {
+                platform_additions.insert(
+                    crate::reverse_session_takeover::PEER_CAPABILITY.into(),
+                    json!(true),
+                );
+            }
             platform_additions.insert(
                 "is_installed".into(),
                 json!(crate::platform::is_installed()),

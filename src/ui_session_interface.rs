@@ -141,6 +141,11 @@ impl ConnectionRoundState {
     pub fn is_connected(&self) -> bool {
         matches!(self.state, ConnectionState::Connected)
     }
+
+    #[cfg(windows)]
+    pub(crate) fn is_current_connected_round(&self, round: u32) -> bool {
+        self.round == round && self.is_connected()
+    }
 }
 
 impl Default for ConnectionRoundState {

@@ -115,6 +115,8 @@ struct ParsedPeerInfo {
     idd_impl: String,
     support_view_camera: bool,
     support_terminal: bool,
+    #[cfg(windows)]
+    reverse_takeover_allowed: bool,
 }
 
 impl ParsedPeerInfo {
@@ -341,6 +343,11 @@ impl<T: InvokeUiSession> Remote<T> {
                         }
                         d = self.receiver.recv() => {
                             if let Some(d) = d {
+                                #[cfg(windows)]
+                                if matches!(&d, Data::ReverseDesktopFrameDecoded) {
+                                    self.handle_reverse_desktop_frame(round).await;
+                                    continue;
+                                }
                                 if !self.handle_msg_from_ui(d, &mut peer).await {
                                     break;
                                 }
@@ -771,22 +778,29 @@ impl<T: InvokeUiSession> Remote<T> {
         });
     }
 
+    #[cfg(windows)]
+    async fn handle_reverse_desktop_frame(&mut self, round: u32) {
+        let eligible = self.is_connected
+            && self.peer_info.reverse_takeover_allowed
+            && *self.handler.server_keyboard_enabled.read().unwrap()
+            && !self.handler.lc.read().unwrap().view_only.v;
+        if eligible {
+            if let Some(incoming) = self.reverse_desktop.take() {
+                crate::reverse_session_takeover::take_over(
+                    incoming,
+                    &self.handler.connection_round_state,
+                    round,
+                )
+                .await;
+            }
+        }
+    }
+
     async fn handle_msg_from_ui(&mut self, data: Data, peer: &mut Stream) -> bool {
         match data {
             Data::Close => {
                 self.send_close_reason(peer, "").await;
                 return false;
-            }
-            #[cfg(windows)]
-            Data::ReverseDesktopFrameDecoded => {
-                if self.is_connected
-                    && *self.handler.server_keyboard_enabled.read().unwrap()
-                    && !self.handler.lc.read().unwrap().view_only.v
-                {
-                    if let Some(incoming) = self.reverse_desktop.take() {
-                        crate::reverse_session_takeover::take_over(incoming).await;
-                    }
-                }
             }
             Data::Login((os_username, os_password, password, remember)) => {
                 self.handler
@@ -2631,6 +2645,13 @@ impl<T: InvokeUiSession> Remote<T> {
         if let Ok(platform_additions) =
             serde_json::from_str::<HashMap<String, serde_json::Value>>(&pi.platform_additions)
         {
+            #[cfg(windows)]
+            {
+                self.peer_info.reverse_takeover_allowed = platform_additions
+                    .get(crate::reverse_session_takeover::PEER_CAPABILITY)
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false);
+            }
             self.peer_info.is_installed = platform_additions
                 .get("is_installed")
                 .map(|v| v.as_bool())
@@ -2930,7 +2951,10 @@ impl<T: InvokeUiSession> Remote<T> {
         };
         let handler = self.handler.ui_handler.clone();
         #[cfg(windows)]
-        let mut decoded = if self.is_connected && self.reverse_desktop.is_some() {
+        let mut decoded = if self.is_connected
+            && self.peer_info.reverse_takeover_allowed
+            && self.reverse_desktop.is_some()
+        {
             Some(self.sender.clone())
         } else {
             None
