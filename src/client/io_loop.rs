@@ -91,6 +91,8 @@ pub struct Remote<T: InvokeUiSession> {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     initial_clipboard_pending: bool,
     first_frame: bool,
+    #[cfg(windows)]
+    reverse_desktop: Option<crate::reverse_session_takeover::IncomingDesktop>,
     #[cfg(any(target_os = "windows", feature = "unix-file-copy-paste"))]
     client_conn_id: i32, // used for file clipboard
     data_count: Arc<AtomicUsize>,
@@ -143,6 +145,8 @@ impl<T: InvokeUiSession> Remote<T> {
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             initial_clipboard_pending: false,
             first_frame: false,
+            #[cfg(windows)]
+            reverse_desktop: None,
             #[cfg(any(target_os = "windows", feature = "unix-file-copy-paste"))]
             client_conn_id: 0,
             data_count: Arc::new(AtomicUsize::new(0)),
@@ -195,6 +199,15 @@ impl<T: InvokeUiSession> Remote<T> {
             ConnType::default()
         };
 
+        #[cfg(windows)]
+        let reverse_desktop = if conn_type == ConnType::DEFAULT_CONN
+            && !self.handler.lc.read().unwrap().view_only.v
+        {
+            crate::reverse_session_takeover::snapshot_before_dial(&self.handler.get_id()).await
+        } else {
+            None
+        };
+
         match Client::start(
             &self.handler.get_id(),
             key,
@@ -205,6 +218,10 @@ impl<T: InvokeUiSession> Remote<T> {
         .await
         {
             Ok(((mut peer, direct, pk, kcp, stream_type), (feedback, rendezvous_server))) => {
+                #[cfg(windows)]
+                if direct && stream_type == "TCP" {
+                    self.reverse_desktop = reverse_desktop;
+                }
                 self.handler
                     .connection_round_state
                     .lock()
@@ -759,6 +776,17 @@ impl<T: InvokeUiSession> Remote<T> {
             Data::Close => {
                 self.send_close_reason(peer, "").await;
                 return false;
+            }
+            #[cfg(windows)]
+            Data::ReverseDesktopFrameDecoded => {
+                if self.is_connected
+                    && *self.handler.server_keyboard_enabled.read().unwrap()
+                    && !self.handler.lc.read().unwrap().view_only.v
+                {
+                    if let Some(incoming) = self.reverse_desktop.take() {
+                        crate::reverse_session_takeover::take_over(incoming).await;
+                    }
+                }
             }
             Data::Login((os_username, os_password, password, remember)) => {
                 self.handler
@@ -2901,6 +2929,12 @@ impl<T: InvokeUiSession> Remote<T> {
             discard_queue: discard_queue.clone(),
         };
         let handler = self.handler.ui_handler.clone();
+        #[cfg(windows)]
+        let mut decoded = if self.is_connected && self.reverse_desktop.is_some() {
+            Some(self.sender.clone())
+        } else {
+            None
+        };
         crate::client::start_video_thread(
             self.handler.clone(),
             display,
@@ -2919,6 +2953,10 @@ impl<T: InvokeUiSession> Remote<T> {
                 } else {
                     #[cfg(all(feature = "vram", feature = "flutter"))]
                     handler.on_texture(display, _texture);
+                }
+                #[cfg(windows)]
+                if let Some(sender) = decoded.take() {
+                    let _ = sender.send(Data::ReverseDesktopFrameDecoded);
                 }
             },
         );
